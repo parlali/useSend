@@ -5,6 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
+    "test:emails": "tsx src/test-emails.ts",
+    "test:smtp": "tsx src/smtp-flow-test.ts",
     "build": "tsup",
     "start": "node dist/server.js"
   },
@@ -23,6 +25,7 @@
     "@types/node": "^22.15.2",
     "@types/nodemailer": "^6.4.17",
     "tsup": "^8.4.0",
+    "tsx": "^4.0.0",
     "typescript": "^5.8.3"
   }
 }

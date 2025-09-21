@@ -1,29 +1,48 @@
 name: usesend-smtp-server
 
 services:
+  certs:
+    image: ldez/traefik-certs-dumper:latest
+    restart: unless-stopped
+    environment:
+      - TZ=Europe/Berlin
+    command:
+      - file
+      - --watch
+      - --version=v2
+      - --source=/acme/acme.json
+      - --dest=/certs
+      - --domain-subdir
+      - --crt-name=fullchain
+      - --key-name=privatekey
+      - --crt-ext=.pem
+      - --key-ext=.pem
+    volumes:
+      - /data/coolify/proxy/acme.json:/acme/acme.json:ro
+      - certs:/certs
+
   smtp-server:
     container_name: usesend-smtp-server
-    image: usesend/smtp-proxy:latest
-    # Pass necessary environment variables
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - certs
     environment:
-      SMTP_AUTH_USERNAME: "usesend" # can be anything, just use the same while sending emails
-      USESEND_BASE_URL: "https://app.usesend.com" # your self hosted useSend instance url
-
-      # Uncomment this if you have SSL certificates. port 465 and 2465 will be using SSL
-      # USESEND_API_KEY_PATH: "/certs/server.key"
-      # USESEND_API_CERT_PATH: "/certs/server.crt"
-    # If you have SSL certificates, mount them here (read-only recommended)
-
-    # volumes:
-    #   - ./certs/server.key:/certs/server.key:ro
-    #   - ./certs/server.crt:/certs/server.crt:ro
-
-    # Expose the SMTP ports
+      SMTP_AUTH_USERNAME: "usesend"
+      USESEND_BASE_URL: "https://usesend.yourcloudhosts.com"
+      USESEND_API_CERT_PATH: "/certs/smtptwo.yourcloudhosts.com/fullchain.pem"
+      USESEND_API_KEY_PATH: "/certs/smtptwo.yourcloudhosts.com/privatekey.pem"
+      NODE_ENV: "production"
+    volumes:
+      - certs:/certs:ro
     ports:
       - "25:25"
       - "587:587"
       - "2587:2587"
       - "465:465"
       - "2465:2465"
-    # Restart always or on-failure, depending on preference
     restart: unless-stopped
+
+volumes:
+  certs:

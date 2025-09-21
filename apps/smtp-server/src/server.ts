@@ -15,6 +15,15 @@ const SSL_KEY_PATH =
   process.env.USESEND_API_KEY_PATH ?? process.env.UNSEND_API_KEY_PATH;
 const SSL_CERT_PATH =
   process.env.USESEND_API_CERT_PATH ?? process.env.UNSEND_API_CERT_PATH;
+const DISABLE_SSL = process.env.DISABLE_SSL === "true" || process.env.NODE_ENV === "development";
+
+console.log("🚀 Starting SMTP Server with config:", {
+  AUTH_USERNAME,
+  DISABLE_SSL,
+  SSL_KEY_PATH: !!SSL_KEY_PATH,
+  SSL_CERT_PATH: !!SSL_CERT_PATH,
+  BASE_URL
+});
 
 async function sendEmailToUseSend(emailData: any, apiKey: string) {
   try {
@@ -59,6 +68,10 @@ async function sendEmailToUseSend(emailData: any, apiKey: string) {
 }
 
 function loadCertificates(): { key?: Buffer; cert?: Buffer } {
+  if (DISABLE_SSL) {
+    console.log("SSL disabled for local testing")
+    return { key: undefined, cert: undefined }
+  }
   return {
     key: SSL_KEY_PATH ? readFileSync(SSL_KEY_PATH) : undefined,
     cert: SSL_CERT_PATH ? readFileSync(SSL_CERT_PATH) : undefined,
@@ -67,58 +80,122 @@ function loadCertificates(): { key?: Buffer; cert?: Buffer } {
 
 const initialCerts = loadCertificates();
 
-const serverOptions: SMTPServerOptions = {
+// Shared handlers for both SSL and non-SSL servers
+const emailDataHandler = (
+  stream: Readable,
+  session: SMTPServerSession,
+  callback: (error?: Error) => void,
+) => {
+  console.log("Receiving email data..."); // Debug statement
+  simpleParser(stream, (err, parsed) => {
+    if (err) {
+      console.error("Failed to parse email data:", err.message);
+      return callback(err);
+    }
+
+    if (!session.user) {
+      console.error("No API key found in session");
+      return callback(new Error("No API key found in session"));
+    }
+
+    // Helper function to extract email addresses
+    const extractEmails = (addressList: any) => {
+      if (!addressList) return undefined
+      if (Array.isArray(addressList)) {
+        return addressList.map((addr) => addr.text).join(", ")
+      }
+      return addressList.text
+    }
+
+    // Extract attachments if present
+    const attachments = parsed.attachments?.map((attachment) => ({
+      filename: attachment.filename || 'attachment',
+      content: attachment.content?.toString('base64') || '',
+      contentType: attachment.contentType || 'application/octet-stream',
+      size: attachment.size
+    }))
+
+    // If only plain text is provided, wrap it in minimal HTML for tracking
+    let htmlContent = parsed.html
+    if (!htmlContent && parsed.text) {
+      htmlContent = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 20px;">
+    <div style="white-space: pre-wrap;">${parsed.text.replace(/\n/g, '<br>')}</div>
+</body>
+</html>`
+    }
+
+    const emailObject = {
+      to: extractEmails(parsed.to),
+      from: extractEmails(parsed.from),
+      cc: extractEmails(parsed.cc),
+      bcc: extractEmails(parsed.bcc),
+      subject: parsed.subject,
+      text: parsed.text,
+      html: htmlContent,
+      replyTo: extractEmails(parsed.replyTo),
+      ...(attachments && attachments.length > 0 && { attachments })
+    }
+
+    sendEmailToUseSend(emailObject, session.user)
+      .then(() => {
+        console.log("Email sent successfully to: ", emailObject.to)
+        callback()
+      })
+      .catch((error) => {
+        console.error("Failed to send email:", error.message)
+        callback(error)
+      })
+  });
+}
+
+const authHandler = (auth: any, session: any, callback: (error?: Error, user?: any) => void) => {
+  // Allow plain text auth when SSL is disabled
+  if (DISABLE_SSL) {
+    console.log("Plain text authentication (SSL disabled)")
+  }
+
+  console.log("🔐 Auth attempt:", {
+    username: auth.username,
+    passwordPresent: !!auth.password,
+    expectedUsername: AUTH_USERNAME,
+    method: auth.method
+  });
+
+  if (auth.username === AUTH_USERNAME && auth.password) {
+    console.log("✅ Authenticated successfully");
+    callback(undefined, { user: auth.password }); // Pass the API key in user object
+  } else {
+    console.error("❌ Invalid username or password");
+    console.error("Expected username:", AUTH_USERNAME, "Got:", auth.username);
+    console.error("Password present:", !!auth.password);
+    callback(new Error("Invalid username or password"));
+  }
+}
+
+// SSL-enabled server configuration
+const sslServerOptions: SMTPServerOptions = {
   secure: false,
   key: initialCerts.key,
   cert: initialCerts.cert,
-  onData(
-    stream: Readable,
-    session: SMTPServerSession,
-    callback: (error?: Error) => void,
-  ) {
-    console.log("Receiving email data..."); // Debug statement
-    simpleParser(stream, (err, parsed) => {
-      if (err) {
-        console.error("Failed to parse email data:", err.message);
-        return callback(err);
-      }
+  allowInsecureAuth: false,
+  onData: emailDataHandler,
+  onAuth: authHandler,
+  size: 10485760,
+}
 
-      if (!session.user) {
-        console.error("No API key found in session");
-        return callback(new Error("No API key found in session"));
-      }
-
-      const emailObject = {
-        to: Array.isArray(parsed.to)
-          ? parsed.to.map((addr) => addr.text).join(", ")
-          : parsed.to?.text,
-        from: Array.isArray(parsed.from)
-          ? parsed.from.map((addr) => addr.text).join(", ")
-          : parsed.from?.text,
-        subject: parsed.subject,
-        text: parsed.text,
-        html: parsed.html,
-        replyTo: parsed.replyTo?.text,
-      };
-
-      sendEmailToUseSend(emailObject, session.user)
-        .then(() => callback())
-        .then(() => console.log("Email sent successfully to: ", emailObject.to))
-        .catch((error) => {
-          console.error("Failed to send email:", error.message);
-          callback(error);
-        });
-    });
-  },
-  onAuth(auth, session: any, callback: (error?: Error, user?: any) => void) {
-    if (auth.username === AUTH_USERNAME && auth.password) {
-      console.log("Authenticated successfully"); // Debug statement
-      callback(undefined, { user: auth.password });
-    } else {
-      console.error("Invalid username or password");
-      callback(new Error("Invalid username or password"));
-    }
-  },
+// Plain server configuration (no TLS at all)
+const plainServerOptions: SMTPServerOptions = {
+  secure: false,
+  allowInsecureAuth: true,
+  hideSTARTTLS: true,
+  onData: emailDataHandler,
+  onAuth: authHandler,
   size: 10485760,
 };
 
@@ -126,10 +203,10 @@ function startServers() {
   const servers: SMTPServer[] = [];
   const watchers: FSWatcher[] = [];
 
-  if (SSL_KEY_PATH && SSL_CERT_PATH) {
+  if (!DISABLE_SSL && SSL_KEY_PATH && SSL_CERT_PATH) {
     // Implicit SSL/TLS for ports 465 and 2465
     [465, 2465].forEach((port) => {
-      const server = new SMTPServer({ ...serverOptions, secure: true });
+      const server = new SMTPServer({ ...sslServerOptions, secure: true });
 
       server.listen(port, () => {
         console.log(
@@ -143,14 +220,18 @@ function startServers() {
 
       servers.push(server);
     });
+  } else if (DISABLE_SSL) {
+    console.log("Skipping SSL/TLS servers (SSL disabled)")
   }
 
-  // STARTTLS for ports 25, 587, and 2587
+  // STARTTLS/Plain for ports 25, 587, and 2587
   [25, 587, 2587].forEach((port) => {
-    const server = new SMTPServer(serverOptions);
+    const serverConfig = DISABLE_SSL ? plainServerOptions : sslServerOptions
+    const server = new SMTPServer(serverConfig);
 
     server.listen(port, () => {
-      console.log(`STARTTLS SMTP server is listening on port ${port}`);
+      const serverType = DISABLE_SSL ? "Plain SMTP" : "STARTTLS SMTP"
+      console.log(`${serverType} server is listening on port ${port}`);
     });
 
     server.on("error", (err) => {
@@ -160,7 +241,7 @@ function startServers() {
     servers.push(server);
   });
 
-  if (SSL_KEY_PATH && SSL_CERT_PATH) {
+  if (!DISABLE_SSL && SSL_KEY_PATH && SSL_CERT_PATH) {
     const reloadCertificates = () => {
       try {
         const { key, cert } = loadCertificates();
