@@ -10,6 +10,7 @@ import {
 } from "@prisma/client";
 import { validateDomainFromEmail } from "./domain-service";
 import { EmailQueueService } from "./email-queue-service";
+import { createEmailWithRecipients } from "./email-service";
 import { Queue, Worker } from "bullmq";
 import { getRedis } from "../redis";
 import {
@@ -396,21 +397,20 @@ async function processContactEmail(jobData: CampaignEmailJob) {
   }
 
   // Create email with filtered recipients
-  const email = await db.email.create({
-    data: {
-      to: filteredToEmails,
-      replyTo: emailConfig.replyTo,
-      cc: filteredCcEmails.length > 0 ? filteredCcEmails : undefined,
-      bcc: filteredBccEmails.length > 0 ? filteredBccEmails : undefined,
-      from: emailConfig.from,
-      subject: emailConfig.subject,
-      html,
-      text: emailConfig.previewText,
-      teamId: emailConfig.teamId,
-      campaignId: emailConfig.campaignId,
-      contactId: contact.id,
-      domainId: emailConfig.domainId,
-    },
+  const email = await createEmailWithRecipients({
+    to: filteredToEmails,
+    replyTo: emailConfig.replyTo,
+    cc: filteredCcEmails.length > 0 ? filteredCcEmails : undefined,
+    bcc: filteredBccEmails.length > 0 ? filteredBccEmails : undefined,
+    from: emailConfig.from,
+    subject: emailConfig.subject,
+    html,
+    text: emailConfig.previewText,
+    teamId: emailConfig.teamId,
+    campaignId: emailConfig.campaignId,
+    contactId: contact.id,
+    domainId: emailConfig.domainId,
+    latestStatus: EmailStatus.QUEUED,
   });
 
   // Queue email for sending

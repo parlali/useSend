@@ -6,6 +6,7 @@ import { validateDomainFromEmail, validateApiKeyDomainAccess } from "./domain-se
 import { EmailRenderer } from "@usesend/email-editor/src/renderer";
 import { logger } from "../logger/log";
 import { SuppressionService } from "./suppression-service";
+import { RecipientType, EmailStatus } from "@prisma/client";
 
 async function checkIfValidEmail(emailId: string) {
   const email = await db.email.findUnique({
@@ -45,6 +46,95 @@ export const replaceVariables = (
 };
 
 /**
+ * Helper function to create an email with corresponding recipient records
+ */
+export async function createEmailWithRecipients(emailData: {
+  to: string[];
+  from: string;
+  subject: string;
+  replyTo?: string[];
+  cc?: string[];
+  bcc?: string[];
+  text?: string | null;
+  html?: string | null;
+  teamId: number;
+  domainId: number;
+  attachments?: string;
+  scheduledAt?: Date;
+  latestStatus: EmailStatus;
+  apiId?: number;
+  inReplyToId?: string;
+  campaignId?: string;
+  contactId?: string;
+}) {
+  // Create the email record
+  const email = await db.email.create({
+    data: emailData,
+  });
+
+  // Create recipient records for TO recipients
+  const recipientPromises: Promise<any>[] = [];
+
+  for (const toEmail of emailData.to || []) {
+    if (toEmail.trim()) {
+      recipientPromises.push(
+        db.emailRecipient.create({
+          data: {
+            emailId: email.id,
+            email: toEmail.trim(),
+            type: 'TO' as RecipientType,
+            latestStatus: emailData.latestStatus,
+            createdAt: email.createdAt,
+            updatedAt: email.updatedAt,
+          }
+        })
+      );
+    }
+  }
+
+  // Create recipient records for CC recipients
+  for (const ccEmail of emailData.cc || []) {
+    if (ccEmail.trim()) {
+      recipientPromises.push(
+        db.emailRecipient.create({
+          data: {
+            emailId: email.id,
+            email: ccEmail.trim(),
+            type: 'CC' as RecipientType,
+            latestStatus: emailData.latestStatus,
+            createdAt: email.createdAt,
+            updatedAt: email.updatedAt,
+          }
+        })
+      );
+    }
+  }
+
+  // Create recipient records for BCC recipients
+  for (const bccEmail of emailData.bcc || []) {
+    if (bccEmail.trim()) {
+      recipientPromises.push(
+        db.emailRecipient.create({
+          data: {
+            emailId: email.id,
+            email: bccEmail.trim(),
+            type: 'BCC' as RecipientType,
+            latestStatus: emailData.latestStatus,
+            createdAt: email.createdAt,
+            updatedAt: email.updatedAt,
+          }
+        })
+      );
+    }
+  }
+
+  // Create all recipient records
+  await Promise.all(recipientPromises);
+
+  return email;
+}
+
+/**
  Send transactional email
  */
 export async function sendEmail(
@@ -71,21 +161,21 @@ export async function sendEmail(
   let html = htmlFromApiCall;
 
   let domain: Awaited<ReturnType<typeof validateDomainFromEmail>>;
-  
+
   // If this is an API call with an API key, validate domain access
   if (apiKeyId) {
     const apiKey = await db.apiKey.findUnique({
       where: { id: apiKeyId },
       include: { domain: true },
     });
-    
+
     if (!apiKey) {
       throw new UnsendApiError({
         code: "BAD_REQUEST",
         message: "Invalid API key",
       });
     }
-    
+
     domain = await validateApiKeyDomainAccess(from, teamId, apiKey);
   } else {
     // For non-API calls (dashboard, etc.), use regular domain validation
@@ -240,28 +330,26 @@ export async function sendEmail(
     ? Math.max(0, scheduledAtDate.getTime() - Date.now())
     : undefined;
 
-  const email = await db.email.create({
-    data: {
-      to: filteredToEmails,
-      from,
-      subject: subject as string,
-      replyTo: replyTo
-        ? Array.isArray(replyTo)
-          ? replyTo
-          : [replyTo]
-        : undefined,
-      cc: filteredCcEmails.length > 0 ? filteredCcEmails : undefined,
-      bcc: filteredBccEmails.length > 0 ? filteredBccEmails : undefined,
-      text,
-      html,
-      teamId,
-      domainId: domain.id,
-      attachments: attachments ? JSON.stringify(attachments) : undefined,
-      scheduledAt: scheduledAtDate,
-      latestStatus: scheduledAtDate ? "SCHEDULED" : "QUEUED",
-      apiId: apiKeyId,
-      inReplyToId,
-    },
+  const email = await createEmailWithRecipients({
+    to: filteredToEmails,
+    from,
+    subject: subject as string,
+    replyTo: replyTo
+      ? Array.isArray(replyTo)
+        ? replyTo
+        : [replyTo]
+      : undefined,
+    cc: filteredCcEmails.length > 0 ? filteredCcEmails : undefined,
+    bcc: filteredBccEmails.length > 0 ? filteredBccEmails : undefined,
+    text,
+    html,
+    teamId,
+    domainId: domain.id,
+    attachments: attachments ? JSON.stringify(attachments) : undefined,
+    scheduledAt: scheduledAtDate,
+    latestStatus: scheduledAtDate ? EmailStatus.SCHEDULED : EmailStatus.QUEUED,
+    apiId: apiKeyId,
+    inReplyToId: inReplyToId || undefined,
   });
 
   try {
@@ -467,7 +555,6 @@ export async function sendBulkEmails(
     if (!originalContent) continue;
 
     const {
-      to,
       from,
       subject: subjectFromApiCall,
       templateId,
@@ -477,8 +564,6 @@ export async function sendBulkEmails(
       teamId,
       attachments,
       replyTo,
-      cc,
-      bcc,
       scheduledAt,
       apiKeyId,
       inReplyToId,
@@ -691,28 +776,26 @@ export async function sendBulkEmails(
         : undefined;
 
       try {
-        // Create email record
-        const email = await db.email.create({
-          data: {
-            to: Array.isArray(to) ? to : [to],
-            from,
-            subject: subject as string,
-            replyTo: replyTo
-              ? Array.isArray(replyTo)
-                ? replyTo
-                : [replyTo]
-              : undefined,
-            cc: cc && cc.length > 0 ? cc : undefined,
-            bcc: bcc && bcc.length > 0 ? bcc : undefined,
-            text,
-            html,
-            teamId,
-            domainId: domain.id,
-            attachments: attachments ? JSON.stringify(attachments) : undefined,
-            scheduledAt: scheduledAtDate,
-            latestStatus: scheduledAtDate ? "SCHEDULED" : "QUEUED",
-            apiId: apiKeyId,
-          },
+        // Create email record with recipients
+        const email = await createEmailWithRecipients({
+          to: Array.isArray(to) ? to : [to],
+          from,
+          subject: subject as string,
+          replyTo: replyTo
+            ? Array.isArray(replyTo)
+              ? replyTo
+              : [replyTo]
+            : undefined,
+          cc: cc && cc.length > 0 ? cc : undefined,
+          bcc: bcc && bcc.length > 0 ? bcc : undefined,
+          text,
+          html,
+          teamId,
+          domainId: domain.id,
+          attachments: attachments ? JSON.stringify(attachments) : undefined,
+          scheduledAt: scheduledAtDate,
+          latestStatus: scheduledAtDate ? EmailStatus.SCHEDULED : EmailStatus.QUEUED,
+          apiId: apiKeyId,
         });
 
         createdEmails.push({ email, originalIndex });
