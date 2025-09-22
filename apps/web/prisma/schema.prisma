@@ -261,6 +261,7 @@ model Email {
   inReplyToId  String?
   team         Team         @relation(fields: [teamId], references: [id], onDelete: Cascade)
   emailEvents  EmailEvent[]
+  recipients   EmailRecipient[]
 
   @@index([createdAt(sort: Desc)])
 }
@@ -276,6 +277,40 @@ model EmailEvent {
 
   @@index([emailId])
   @@index([teamId])
+}
+
+enum RecipientType {
+  TO
+  CC
+  BCC
+}
+
+model EmailRecipient {
+  id           String               @id @default(cuid())
+  emailId      String
+  email        String               // The recipient's email address
+  type         RecipientType        // TO, CC, or BCC
+  latestStatus EmailStatus          @default(QUEUED)
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  parentEmail  Email                @relation(fields: [emailId], references: [id], onDelete: Cascade)
+  events       EmailRecipientEvent[]
+
+  @@index([emailId])
+  @@index([email])
+}
+
+model EmailRecipientEvent {
+  id          String        @id @default(cuid())
+  recipientId String
+  status      EmailStatus
+  data        Json?
+  createdAt   DateTime      @default(now())
+
+  recipient   EmailRecipient @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@index([recipientId])
 }
 
 model ContactBook {

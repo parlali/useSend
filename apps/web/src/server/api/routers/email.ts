@@ -1,4 +1,4 @@
-import { Email, EmailStatus, Prisma } from "@prisma/client";
+import { Email, EmailStatus, Prisma, EmailRecipient, RecipientType } from "@prisma/client";
 import { format, subDays } from "date-fns";
 import { z } from "zod";
 import { DEFAULT_QUERY_LIMIT } from "~/lib/constants";
@@ -94,36 +94,48 @@ export const emailRouter = createTRPCRouter({
       const limit = DEFAULT_QUERY_LIMIT;
       const offset = (page - 1) * limit;
 
-      const emails = await db.$queryRaw<Array<Email>>`
-        SELECT 
-          id, 
-          "createdAt", 
-          "latestStatus", 
-          subject, 
-          "to", 
-          "scheduledAt"
-        FROM "Email"
-        WHERE "teamId" = ${ctx.team.id}
-        ${input.status ? Prisma.sql`AND "latestStatus"::text = ${input.status}` : Prisma.sql``}
-        ${input.domain ? Prisma.sql`AND "domainId" = ${input.domain}` : Prisma.sql``}
-        ${input.apiId ? Prisma.sql`AND "apiId" = ${input.apiId}` : Prisma.sql``}
+      const recipients = await db.$queryRaw<Array<{
+        id: string;
+        emailId: string;
+        email: string;
+        type: RecipientType;
+        latestStatus: EmailStatus;
+        createdAt: Date;
+        scheduledAt: Date | null;
+        subject: string;
+        from: string;
+      }>>`
+        SELECT
+          r.id,
+          r."emailId",
+          r.email,
+          r.type,
+          r."latestStatus",
+          e."createdAt",
+          e."scheduledAt",
+          e.subject,
+          e."from"
+        FROM "EmailRecipient" r
+        JOIN "Email" e ON r."emailId" = e.id
+        WHERE e."teamId" = ${ctx.team.id}
+        ${input.status ? Prisma.sql`AND r."latestStatus"::text = ${input.status}` : Prisma.sql``}
+        ${input.domain ? Prisma.sql`AND e."domainId" = ${input.domain}` : Prisma.sql``}
+        ${input.apiId ? Prisma.sql`AND e."apiId" = ${input.apiId}` : Prisma.sql``}
         ${
           input.search
             ? Prisma.sql`AND (
-          "subject" ILIKE ${`%${input.search}%`} 
-          OR EXISTS (
-            SELECT 1 FROM unnest("to") AS email 
-            WHERE email ILIKE ${`%${input.search}%`}
-          )
+          e."subject" ILIKE ${`%${input.search}%`}
+          OR r.email ILIKE ${`%${input.search}%`}
+          OR e."from" ILIKE ${`%${input.search}%`}
         )`
             : Prisma.sql``
         }
-        ORDER BY "createdAt" DESC
+        ORDER BY e."createdAt" DESC
         LIMIT ${DEFAULT_QUERY_LIMIT}
         OFFSET ${offset}
       `;
 
-      return { emails };
+      return { recipients };
     }),
 
   exportEmails: teamProcedure
@@ -136,9 +148,10 @@ export const emailRouter = createTRPCRouter({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const emails = await db.$queryRaw<
+      const recipients = await db.$queryRaw<
         Array<{
-          to: string[];
+          from: string;
+          email: string;
           latestStatus: EmailStatus;
           subject: string;
           scheduledAt: Date | null;
@@ -147,24 +160,26 @@ export const emailRouter = createTRPCRouter({
         }>
       >`
         SELECT
-          e."to",
-          e."latestStatus",
+          e."from",
+          r.email,
+          r."latestStatus",
           e.subject,
           e."scheduledAt",
           e."createdAt",
           b.data as "bounceData"
-        FROM "Email" e
+        FROM "EmailRecipient" r
+        JOIN "Email" e ON r."emailId" = e.id
         LEFT JOIN LATERAL (
           SELECT data
-          FROM "EmailEvent"
-          WHERE "emailId" = e.id AND "status" = 'BOUNCED'
+          FROM "EmailRecipientEvent"
+          WHERE "recipientId" = r.id AND "status" = 'BOUNCED'
           ORDER BY "createdAt" DESC
           LIMIT 1
         ) b ON true
         WHERE e."teamId" = ${ctx.team.id}
         ${
           input.status
-            ? Prisma.sql`AND e."latestStatus"::text = ${input.status}`
+            ? Prisma.sql`AND r."latestStatus"::text = ${input.status}`
             : Prisma.sql``
         }
         ${
@@ -181,10 +196,8 @@ export const emailRouter = createTRPCRouter({
           input.search
             ? Prisma.sql`AND (
           e."subject" ILIKE ${`%${input.search}%`}
-          OR EXISTS (
-            SELECT 1 FROM unnest(e."to") AS email
-            WHERE email ILIKE ${`%${input.search}%`}
-          )
+          OR r.email ILIKE ${`%${input.search}%`}
+          OR e."from" ILIKE ${`%${input.search}%`}
         )`
             : Prisma.sql``
         }
@@ -192,19 +205,20 @@ export const emailRouter = createTRPCRouter({
         LIMIT 10000
       `;
 
-      return emails.map((email) => {
+      return recipients.map((recipient) => {
         const base = {
-          to: email.to.join("; "),
-          status: email.latestStatus,
-          subject: email.subject,
-          sentAt: (email.scheduledAt ?? email.createdAt).toISOString(),
+          sender: recipient.from,
+          recipient: recipient.email,
+          status: recipient.latestStatus,
+          subject: recipient.subject,
+          sentAt: (recipient.scheduledAt ?? recipient.createdAt).toISOString(),
         } as const;
 
-        if (email.latestStatus !== "BOUNCED" || !email.bounceData) {
+        if (recipient.latestStatus !== "BOUNCED" || !recipient.bounceData) {
           return { ...base, bounceType: undefined, bounceSubType: undefined, bounceReason: undefined };
         }
 
-        const bounce = ensureBounceObject(email.bounceData);
+        const bounce = ensureBounceObject(recipient.bounceData);
         const bounceType = bounce?.bounceType?.toString().trim() || undefined;
         const bounceSubType = bounce?.bounceSubType
           ? bounce.bounceSubType.toString().trim().replace(/\s+/g, "")
@@ -231,6 +245,9 @@ export const emailRouter = createTRPCRouter({
         latestStatus: true,
         subject: true,
         to: true,
+        cc: true,
+        bcc: true,
+        replyTo: true,
         from: true,
         domainId: true,
         text: true,
@@ -241,6 +258,40 @@ export const emailRouter = createTRPCRouter({
 
     return email;
   }),
+
+  getRecipient: teamProcedure
+    .input(z.object({ recipientId: z.string() }))
+    .query(async ({ input }) => {
+      const recipient = await db.emailRecipient.findUnique({
+        where: {
+          id: input.recipientId,
+        },
+        include: {
+          events: {
+            orderBy: {
+              createdAt: "desc",
+            },
+          },
+          parentEmail: {
+            select: {
+              id: true,
+              from: true,
+              to: true,
+              cc: true,
+              bcc: true,
+              replyTo: true,
+              subject: true,
+              html: true,
+              text: true,
+              createdAt: true,
+              scheduledAt: true,
+            },
+          },
+        },
+      });
+
+      return recipient;
+    }),
 
   cancelEmail: emailProcedure.mutation(async ({ input }) => {
     await cancelEmail(input.id);

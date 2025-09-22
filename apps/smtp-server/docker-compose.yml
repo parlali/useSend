@@ -18,7 +18,7 @@ services:
       - --crt-ext=.pem
       - --key-ext=.pem
     volumes:
-      - /data/coolify/proxy/acme.json:/acme/acme.json:ro
+      - ${ACME_JSON_PATH}:/acme/acme.json:ro
       - certs:/certs
 
   smtp-server:
@@ -30,9 +30,9 @@ services:
       - certs
     environment:
       SMTP_AUTH_USERNAME: "usesend"
-      USESEND_BASE_URL: "https://usesend.yourcloudhosts.com"
-      USESEND_API_CERT_PATH: "/certs/smtptwo.yourcloudhosts.com/fullchain.pem"
-      USESEND_API_KEY_PATH: "/certs/smtptwo.yourcloudhosts.com/privatekey.pem"
+      USESEND_BASE_URL: ${USESEND_BASE_URL}
+      USESEND_API_CERT_PATH: ${USESEND_API_CERT_PATH}
+      USESEND_API_KEY_PATH: ${USESEND_API_KEY_PATH}
       NODE_ENV: "production"
     volumes:
       - certs:/certs:ro

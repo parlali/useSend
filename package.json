@@ -12,6 +12,7 @@
     "dev": "pnpm load-env -- turbo dev",
     "dev:docs": "cd apps/docs && mintlify dev",
     "dev:marketing": "cd apps/marketing && turbo dev",
+    "dev:web": "cd apps/web && pnpm dev",
     "lint": "turbo lint",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
     "db:generate": "pnpm db db:generate",

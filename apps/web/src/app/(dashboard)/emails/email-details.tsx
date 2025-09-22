@@ -23,63 +23,96 @@ import {
 import CancelEmail from "./cancel-email";
 import { useEffect } from "react";
 import { useState } from "react";
+import { extractEmailAddress } from "~/utils/email";
 
 export default function EmailDetails({ emailId }: { emailId: string }) {
-  const emailQuery = api.email.getEmail.useQuery({ id: emailId });
+  // Note: emailId is actually a recipientId now, keeping the prop name for backward compatibility
+  const recipientQuery = api.email.getRecipient.useQuery({ recipientId: emailId });
 
   return (
     <div className="h-full overflow-auto px-4 no-scrollbar">
       <div className="flex justify-between items-center">
         <div className="flex gap-4 items-center">
-          <h1 className="font-bold">{emailQuery.data?.to}</h1>
-          <EmailStatusBadge status={emailQuery.data?.latestStatus ?? "SENT"} />
+          <h1 className="font-bold">{extractEmailAddress(recipientQuery.data?.email || "")}</h1>
+          <EmailStatusBadge status={recipientQuery.data?.latestStatus ?? "SENT"} />
         </div>
       </div>
       <div className="flex flex-col mt-8 items-start gap-8">
-        <div className="p-2 rounded-lg border  flex flex-col gap-2 w-full shadow">
-          {/* <div className="flex gap-2">
-            <span className="w-[100px] text-muted-foreground text-sm">
-              From
-            </span>
-            <span className="text-sm">{emailQuery.data?.from}</span>
+        <div className="p-4 rounded-lg border flex flex-col gap-3 w-full shadow">
+          <div className="font-medium text-lg mb-2">Email Headers</div>
+
+          <div className="flex gap-2">
+            <span className="w-[80px] text-muted-foreground text-sm font-medium">From:</span>
+            <span className="text-sm">{recipientQuery.data?.parentEmail?.from || ""}</span>
           </div>
           <Separator />
+
           <div className="flex gap-2">
-            <span className="w-[100px] text-muted-foreground text-sm">To</span>
-            <span className="text-sm">{emailQuery.data?.to}</span>
+            <span className="w-[80px] text-muted-foreground text-sm font-medium">To:</span>
+            <span className="text-sm">{recipientQuery.data?.parentEmail?.to?.join(", ") || ""}</span>
           </div>
           <Separator />
+
+          {recipientQuery.data?.parentEmail?.cc && recipientQuery.data?.parentEmail?.cc.length > 0 && (
+            <>
+              <div className="flex gap-2">
+                <span className="w-[80px] text-muted-foreground text-sm font-medium">CC:</span>
+                <span className="text-sm">{recipientQuery.data.parentEmail.cc.join(", ")}</span>
+              </div>
+              <Separator />
+            </>
+          )}
+
+          {recipientQuery.data?.parentEmail?.bcc && recipientQuery.data?.parentEmail?.bcc.length > 0 && (
+            <>
+              <div className="flex gap-2">
+                <span className="w-[80px] text-muted-foreground text-sm font-medium">BCC:</span>
+                <span className="text-sm">{recipientQuery.data.parentEmail.bcc.join(", ")}</span>
+              </div>
+              <Separator />
+            </>
+          )}
+
           <div className="flex gap-2">
-            <span className="w-[100px] text-muted-foreground text-sm">
-              Subject
+            <span className="w-[80px] text-muted-foreground text-sm font-medium">Subject:</span>
+            <span className="text-sm">{recipientQuery.data?.parentEmail?.subject}</span>
+          </div>
+          <Separator />
+
+          <div className="flex gap-2">
+            <span className="w-[80px] text-muted-foreground text-sm font-medium">Date:</span>
+            <span className="text-sm">
+              {recipientQuery.data?.parentEmail?.createdAt ?
+                formatDate(recipientQuery.data.parentEmail.createdAt, "MMM dd, yyyy 'at' hh:mm a") :
+                "--"
+              }
             </span>
-            <span className="text-sm">{emailQuery.data?.subject}</span>
-          </div> */}
-          <div className="flex flex-col gap-1 px-4 py-1">
-            {/* <div className=" text-[15px] font-medium">
-              {emailQuery.data?.to}
-            </div> */}
-            <div className=" text-sm">Subject: {emailQuery.data?.subject}</div>
-            <div className="text-muted-foreground text-xs">
-              From: {emailQuery.data?.from}
+          </div>
+
+          <div className="mt-4">
+            <div className="font-medium mb-2">This Recipient</div>
+            <div className="flex gap-2">
+              <span className="w-[80px] text-muted-foreground text-sm font-medium">Address:</span>
+              <span className="text-sm">{extractEmailAddress(recipientQuery.data?.email || "")}</span>
             </div>
           </div>
-          {emailQuery.data?.latestStatus === "SCHEDULED" &&
-          emailQuery.data?.scheduledAt ? (
+
+          {recipientQuery.data?.latestStatus === "SCHEDULED" &&
+          recipientQuery.data?.parentEmail?.scheduledAt ? (
             <>
               <Separator />
-              <div className="flex gap-2 items-center px-4">
-                <span className="w-[100px] text-muted-foreground text-sm ">
-                  Scheduled at
+              <div className="flex gap-2 items-center">
+                <span className="w-[80px] text-muted-foreground text-sm font-medium">
+                  Scheduled at:
                 </span>
                 <span className="text-sm">
                   {formatDate(
-                    emailQuery.data?.scheduledAt,
+                    recipientQuery.data.parentEmail.scheduledAt,
                     "MMM dd'th', hh:mm a"
                   )}
                 </span>
                 <div className="ml-4">
-                  <CancelEmail emailId={emailId} />
+                  <CancelEmail emailId={recipientQuery.data.parentEmail.id} />
                 </div>
               </div>
             </>
@@ -89,41 +122,47 @@ export default function EmailDetails({ emailId }: { emailId: string }) {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.2, delay: 0.3 }}
+            className="mt-4"
           >
-            <EmailPreview html={emailQuery.data?.html ?? ""} />
+            <div className="font-medium mb-2">Email Content</div>
+            <EmailPreview html={recipientQuery.data?.parentEmail?.html ?? ""} />
           </motion.div>
         </div>
-        {emailQuery.data?.latestStatus !== "SCHEDULED" ? (
-          <div className=" border rounded-lg w-full shadow mb-2 ">
-            <div className="  p-4 flex flex-col gap-8 w-full">
-              <div className="font-medium">Events History</div>
+        {recipientQuery.data?.latestStatus !== "SCHEDULED" ? (
+          <div className="border rounded-lg w-full shadow mb-2">
+            <div className="p-4 flex flex-col gap-8 w-full">
+              <div className="font-medium">Event History for {extractEmailAddress(recipientQuery.data?.email || "")}</div>
               <div className="flex items-stretch px-4 w-full">
                 <div className="border-r border-gray-300 dark:border-gray-700 border-dashed" />
                 <div className="flex flex-col gap-12 w-full">
-                  {emailQuery.data?.emailEvents.map((evt) => (
-                    <div
-                      key={evt.status}
-                      className="flex gap-5 items-start w-full"
-                    >
-                      <div className=" -ml-2.5">
-                        <EmailStatusIcon status={evt.status} />
+                  {recipientQuery.data?.events && recipientQuery.data.events.length > 0 ? (
+                    recipientQuery.data.events.map((evt, index) => (
+                      <div
+                        key={`${evt.status}-${index}`}
+                        className="flex gap-5 items-start w-full"
+                      >
+                        <div className="-ml-2.5">
+                          <EmailStatusIcon status={evt.status} />
+                        </div>
+                        <div className="-mt-[0.125rem] w-full">
+                          <div className="capitalize font-medium">
+                            <EmailStatusBadge status={evt.status} />
+                          </div>
+                          <div className="text-xs text-muted-foreground mt-2">
+                            {formatDate(evt.createdAt, "MMM dd, hh:mm a")}
+                          </div>
+                          <div className="mt-1 text-foreground/80">
+                            <EmailStatusText
+                              status={evt.status}
+                              data={evt.data}
+                            />
+                          </div>
+                        </div>
                       </div>
-                      <div className="-mt-[0.125rem] w-full">
-                        <div className=" capitalize font-medium">
-                          <EmailStatusBadge status={evt.status} />
-                        </div>
-                        <div className="text-xs text-muted-foreground mt-2">
-                          {formatDate(evt.createdAt, "MMM dd, hh:mm a")}
-                        </div>
-                        <div className="mt-1 text-foreground/80">
-                          <EmailStatusText
-                            status={evt.status}
-                            data={evt.data}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                    ))
+                  ) : (
+                    <div className="text-sm text-muted-foreground">No events recorded for this recipient yet.</div>
+                  )}
                 </div>
               </div>
             </div>
