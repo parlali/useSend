@@ -2,11 +2,12 @@ FROM node:20.11.1-alpine AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 ENV SKIP_ENV_VALIDATION="true"
-ENV DOCKER_OUTPUT 1
-ENV NEXT_TELEMETRY_DISABLED 1
+ENV DOCKER_OUTPUT=1
+ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_PUBLIC_IS_CLOUD="false"
 
 RUN corepack enable
+RUN corepack prepare pnpm@8.9.0 --activate
 
 FROM base AS builder
 RUN apk add --no-cache libc6-compat
