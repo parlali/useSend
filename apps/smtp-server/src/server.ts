@@ -115,9 +115,10 @@ const emailDataHandler = (
       size: attachment.size
     }))
 
-    // If only plain text is provided, wrap it in minimal HTML for tracking
+    // Handle different body content scenarios
     let htmlContent = parsed.html
     if (!htmlContent && parsed.text) {
+      // If only plain text is provided, wrap it in minimal HTML for tracking
       htmlContent = `<!DOCTYPE html>
 <html>
 <head>
@@ -128,6 +129,18 @@ const emailDataHandler = (
     <div style="white-space: pre-wrap;">${parsed.text.replace(/\n/g, '<br>')}</div>
 </body>
 </html>`
+    } else if (!htmlContent && !parsed.text) {
+      // If neither HTML nor text is provided, send blank HTML to satisfy API requirements
+      htmlContent = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 20px;">
+    <div></div>
+</body>
+</html>`
     }
 
     const emailObject = {
@@ -135,7 +148,7 @@ const emailDataHandler = (
       from: extractEmails(parsed.from),
       cc: extractEmails(parsed.cc),
       bcc: extractEmails(parsed.bcc),
-      subject: parsed.subject,
+      subject: parsed.subject || "(No Subject)",
       text: parsed.text,
       html: htmlContent,
       replyTo: extractEmails(parsed.replyTo),
