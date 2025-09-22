@@ -4,12 +4,14 @@ import { z } from "zod";
 import { DEFAULT_QUERY_LIMIT } from "~/lib/constants";
 import { BOUNCE_ERROR_MESSAGES } from "~/lib/constants/ses-errors";
 import type { SesBounce } from "~/types/aws-types";
+import type { EmailAttachment } from "~/types";
 
 import {
   createTRPCRouter,
   emailProcedure,
   teamProcedure,
 } from "~/server/api/trpc";
+import { TRPCError } from "@trpc/server";
 import { db } from "~/server/db";
 import { cancelEmail, updateEmail } from "~/server/service/email-service";
 
@@ -136,6 +138,61 @@ export const emailRouter = createTRPCRouter({
       `;
 
       return { recipients };
+    }),
+
+  downloadAttachment: teamProcedure
+    .input(
+      z.object({
+        emailId: z.string(),
+        attachmentIndex: z.number()
+      })
+    )
+    .query(async ({ input, ctx }) => {
+      const email = await db.email.findUnique({
+        where: { id: input.emailId },
+        select: {
+          attachments: true,
+          teamId: true
+        }
+      })
+
+      if (!email) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Email not found"
+        })
+      }
+
+      // Check team access
+      if (email.teamId !== ctx.team.id) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Access denied"
+        })
+      }
+
+      if (!email.attachments) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "No attachments found"
+        })
+      }
+
+      const attachments = JSON.parse(email.attachments) as EmailAttachment[]
+      const attachment = attachments[input.attachmentIndex]
+
+      if (!attachment) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Attachment not found"
+        })
+      }
+
+      return {
+        filename: attachment.filename,
+        content: attachment.content,
+        contentType: 'application/octet-stream'
+      }
     }),
 
   exportEmails: teamProcedure
@@ -285,6 +342,7 @@ export const emailRouter = createTRPCRouter({
               text: true,
               createdAt: true,
               scheduledAt: true,
+              attachments: true,
             },
           },
         },

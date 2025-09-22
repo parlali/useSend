@@ -89,6 +89,17 @@ export default function EmailDetails({ emailId }: { emailId: string }) {
             </span>
           </div>
 
+          {/* Attachments Section */}
+          {recipientQuery.data?.parentEmail?.attachments && (
+            <div className="mt-4">
+              <div className="font-medium mb-2">Attachments</div>
+              <AttachmentsList
+                emailId={recipientQuery.data.parentEmail.id}
+                attachments={JSON.parse(recipientQuery.data.parentEmail.attachments)}
+              />
+            </div>
+          )}
+
           <div className="mt-4">
             <div className="font-medium mb-2">This Recipient</div>
             <div className="flex gap-2">
@@ -356,3 +367,68 @@ const getUserAgent = (userAgent: string) => {
     device: parser.getDevice(),
   };
 };
+
+interface AttachmentsListProps {
+  emailId: string;
+  attachments: Array<{ filename: string; content: string }>;
+}
+
+function AttachmentsList({ emailId, attachments }: AttachmentsListProps) {
+  const utils = api.useUtils();
+
+  const downloadAttachment = async (index: number, filename: string) => {
+    try {
+      const data = await utils.email.downloadAttachment.fetch({
+        emailId,
+        attachmentIndex: index
+      });
+
+      // Convert base64 to blob and download
+      const binaryString = atob(data.content);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      const blob = new Blob([bytes], { type: data.contentType });
+      const url = URL.createObjectURL(blob);
+
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Failed to download attachment:', error);
+    }
+  };
+
+  if (!attachments || attachments.length === 0) {
+    return <div className="text-sm text-muted-foreground">No attachments</div>;
+  }
+
+  return (
+    <div className="space-y-2">
+      {attachments.map((attachment, index) => (
+        <div
+          key={index}
+          className="flex items-center justify-between p-2 border rounded hover:bg-gray-50 dark:hover:bg-gray-800"
+        >
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 bg-blue-100 rounded flex items-center justify-center">
+              📎
+            </div>
+            <span className="text-sm font-medium">{attachment.filename}</span>
+          </div>
+          <button
+            onClick={() => downloadAttachment(index, attachment.filename)}
+            className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+          >
+            Download
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}

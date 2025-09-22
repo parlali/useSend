@@ -415,10 +415,10 @@ async function executeEmail(job: QueueEmailJob) {
       `[EmailQueueService]: Email sent`
     );
 
-    // Delete attachments after sending the email
+    // Update email with SES message ID (keep attachments for future access)
     await db.email.update({
       where: { id: email.id },
-      data: { sesEmailId: messageId, text, attachments: undefined },
+      data: { sesEmailId: messageId, text },
     });
   } catch (error: any) {
     await db.emailEvent.create({
