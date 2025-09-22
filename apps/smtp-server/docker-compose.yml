@@ -18,7 +18,7 @@ services:
       - --crt-ext=.pem
       - --key-ext=.pem
     volumes:
-      - ${ACME_JSON_PATH}:/acme/acme.json:ro
+      - /data/coolify/proxy/acme.json:/acme/acme.json:ro
       - certs:/certs
 
   smtp-server:
