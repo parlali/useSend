@@ -268,7 +268,32 @@ export async function parseSesHook(data: SesEvent) {
     },
   });
 
-  logger.info("Email event created");
+  // Also update EmailRecipient records and create EmailRecipientEvent records
+  const recipients = await db.emailRecipient.findMany({
+    where: { emailId: email.id }
+  });
+
+  for (const recipient of recipients) {
+    // Update recipient's latest status
+    await db.emailRecipient.update({
+      where: { id: recipient.id },
+      data: {
+        latestStatus: mailStatus,
+        updatedAt: new Date()
+      }
+    });
+
+    // Create recipient-specific event
+    await db.emailRecipientEvent.create({
+      data: {
+        recipientId: recipient.id,
+        status: mailStatus,
+        data: mailData as any,
+      }
+    });
+  }
+
+  logger.info("Email event created for email and all recipients");
 
   return true;
 }
