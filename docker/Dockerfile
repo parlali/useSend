@@ -7,7 +7,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_PUBLIC_IS_CLOUD="false"
 
 RUN corepack enable
-RUN corepack prepare pnpm@8.9.0 --activate
+RUN corepack prepare pnpm@9.12.0 --activate
 
 FROM base AS builder
 RUN apk add --no-cache libc6-compat
