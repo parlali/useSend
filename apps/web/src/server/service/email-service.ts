@@ -46,6 +46,18 @@ export const replaceVariables = (
 };
 
 /**
+ * Helper function to split comma-separated email strings into individual emails
+ */
+function splitEmailString(emailString: string): string[] {
+  if (!emailString?.trim()) return []
+
+  // Split by comma and clean up each email
+  return emailString.split(',')
+    .map(email => email.trim())
+    .filter(email => email.length > 0)
+}
+
+/**
  * Helper function to create an email with corresponding recipient records
  */
 export async function createEmailWithRecipients(emailData: {
@@ -75,56 +87,65 @@ export async function createEmailWithRecipients(emailData: {
   // Create recipient records for TO recipients
   const recipientPromises: Promise<any>[] = [];
 
-  for (const toEmail of emailData.to || []) {
-    if (toEmail.trim()) {
-      recipientPromises.push(
-        db.emailRecipient.create({
-          data: {
-            emailId: email.id,
-            email: toEmail.trim(),
-            type: 'TO' as RecipientType,
-            latestStatus: emailData.latestStatus,
-            createdAt: email.createdAt,
-            updatedAt: email.updatedAt,
-          }
-        })
-      );
+  for (const toEmailString of emailData.to || []) {
+    const individualEmails = splitEmailString(toEmailString);
+    for (const toEmail of individualEmails) {
+      if (toEmail.trim()) {
+        recipientPromises.push(
+          db.emailRecipient.create({
+            data: {
+              emailId: email.id,
+              email: toEmail.trim(),
+              type: 'TO' as RecipientType,
+              latestStatus: emailData.latestStatus,
+              createdAt: email.createdAt,
+              updatedAt: email.updatedAt,
+            }
+          })
+        );
+      }
     }
   }
 
   // Create recipient records for CC recipients
-  for (const ccEmail of emailData.cc || []) {
-    if (ccEmail.trim()) {
-      recipientPromises.push(
-        db.emailRecipient.create({
-          data: {
-            emailId: email.id,
-            email: ccEmail.trim(),
-            type: 'CC' as RecipientType,
-            latestStatus: emailData.latestStatus,
-            createdAt: email.createdAt,
-            updatedAt: email.updatedAt,
-          }
-        })
-      );
+  for (const ccEmailString of emailData.cc || []) {
+    const individualEmails = splitEmailString(ccEmailString);
+    for (const ccEmail of individualEmails) {
+      if (ccEmail.trim()) {
+        recipientPromises.push(
+          db.emailRecipient.create({
+            data: {
+              emailId: email.id,
+              email: ccEmail.trim(),
+              type: 'CC' as RecipientType,
+              latestStatus: emailData.latestStatus,
+              createdAt: email.createdAt,
+              updatedAt: email.updatedAt,
+            }
+          })
+        );
+      }
     }
   }
 
   // Create recipient records for BCC recipients
-  for (const bccEmail of emailData.bcc || []) {
-    if (bccEmail.trim()) {
-      recipientPromises.push(
-        db.emailRecipient.create({
-          data: {
-            emailId: email.id,
-            email: bccEmail.trim(),
-            type: 'BCC' as RecipientType,
-            latestStatus: emailData.latestStatus,
-            createdAt: email.createdAt,
-            updatedAt: email.updatedAt,
-          }
-        })
-      );
+  for (const bccEmailString of emailData.bcc || []) {
+    const individualEmails = splitEmailString(bccEmailString);
+    for (const bccEmail of individualEmails) {
+      if (bccEmail.trim()) {
+        recipientPromises.push(
+          db.emailRecipient.create({
+            data: {
+              emailId: email.id,
+              email: bccEmail.trim(),
+              type: 'BCC' as RecipientType,
+              latestStatus: emailData.latestStatus,
+              createdAt: email.createdAt,
+              updatedAt: email.updatedAt,
+            }
+          })
+        );
+      }
     }
   }
 

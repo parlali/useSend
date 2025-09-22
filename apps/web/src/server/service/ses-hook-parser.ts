@@ -1,6 +1,5 @@
 import {
   EmailStatus,
-  Prisma,
   UnsubscribeReason,
   SuppressionReason,
 } from "@prisma/client";
@@ -269,11 +268,32 @@ export async function parseSesHook(data: SesEvent) {
   });
 
   // Also update EmailRecipient records and create EmailRecipientEvent records
-  const recipients = await db.emailRecipient.findMany({
+  // But only for the specific recipients mentioned in the SES event data
+  const allRecipients = await db.emailRecipient.findMany({
     where: { emailId: email.id }
   });
 
-  for (const recipient of recipients) {
+  // Determine which recipients this event applies to
+  const affectedRecipientEmails = getAffectedRecipients(data);
+
+  // Find matching recipient records
+  const affectedRecipients = allRecipients.filter(recipient =>
+    affectedRecipientEmails.some(email =>
+      // Handle both clean emails and "Name <email>" format
+      email === recipient.email ||
+      recipient.email.includes(email) ||
+      email.includes(recipient.email.replace(/^.*<(.+)>.*$/, '$1'))
+    )
+  );
+
+  logger.info({
+    affectedEmails: affectedRecipientEmails,
+    affectedRecipients: affectedRecipients.length,
+    totalRecipients: allRecipients.length,
+    eventType: data.eventType
+  }, "Applying event to specific recipients");
+
+  for (const recipient of affectedRecipients) {
     // Update recipient's latest status
     await db.emailRecipient.update({
       where: { id: recipient.id },
@@ -398,6 +418,44 @@ function getEmailData(data: SesEvent) {
     return data.deliveryDelay;
   } else {
     return data[eventType.toLowerCase() as SesEventDataKey];
+  }
+}
+
+function getAffectedRecipients(data: SesEvent): string[] {
+  const { eventType } = data;
+
+  switch (eventType) {
+    case "Send":
+    case "Reject":
+    case "Rendering Failure":
+      // These events apply to all recipients
+      return data.mail.destination;
+
+    case "Delivery":
+      // Only apply to recipients that were actually delivered
+      return data.delivery?.recipients || [];
+
+    case "Bounce":
+      // Only apply to recipients that bounced
+      return data.bounce?.bouncedRecipients?.map(r => r.emailAddress) || [];
+
+    case "Complaint":
+      // Only apply to recipients that complained
+      return data.complaint?.complainedRecipients?.map(r => r.emailAddress) || [];
+
+    case "DeliveryDelay":
+      // Apply to recipients that had delivery delays
+      return data.deliveryDelay?.delayedRecipients || data.mail.destination;
+
+    case "Open":
+    case "Click":
+      // For opens and clicks, SES typically sends one event per recipient
+      // Use the destination from the mail object (usually contains one recipient for these events)
+      return data.mail.destination;
+
+    default:
+      // For unknown events, apply to all recipients as fallback
+      return data.mail.destination;
   }
 }
 
