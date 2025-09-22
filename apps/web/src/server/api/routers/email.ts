@@ -1,5 +1,4 @@
-import { Email, EmailStatus, Prisma, EmailRecipient, RecipientType } from "@prisma/client";
-import { format, subDays } from "date-fns";
+import { EmailStatus, Prisma, RecipientType } from "@prisma/client";
 import { z } from "zod";
 import { DEFAULT_QUERY_LIMIT } from "~/lib/constants";
 import { BOUNCE_ERROR_MESSAGES } from "~/lib/constants/ses-errors";
@@ -359,5 +358,49 @@ export const emailRouter = createTRPCRouter({
     .input(z.object({ scheduledAt: z.string().datetime() }))
     .mutation(async ({ input }) => {
       await updateEmail(input.id, { scheduledAt: input.scheduledAt });
+    }),
+
+  deleteRecipients: teamProcedure
+    .input(z.object({ recipientIds: z.array(z.string()) }))
+    .mutation(async ({ input, ctx }) => {
+      // Verify all recipients belong to the team before deleting
+      const recipients = await db.emailRecipient.findMany({
+        where: {
+          id: { in: input.recipientIds }
+        },
+        include: {
+          parentEmail: {
+            select: { teamId: true }
+          }
+        }
+      });
+
+      // Check that all recipients belong to the current team
+      const unauthorizedRecipients = recipients.filter(
+        recipient => recipient.parentEmail.teamId !== ctx.team.id
+      );
+
+      if (unauthorizedRecipients.length > 0) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Cannot delete recipients from other teams"
+        });
+      }
+
+      // Delete the recipients and their events
+      await db.$transaction([
+        db.emailRecipientEvent.deleteMany({
+          where: {
+            recipientId: { in: input.recipientIds }
+          }
+        }),
+        db.emailRecipient.deleteMany({
+          where: {
+            id: { in: input.recipientIds }
+          }
+        })
+      ]);
+
+      return { deletedCount: input.recipientIds.length };
     }),
 });

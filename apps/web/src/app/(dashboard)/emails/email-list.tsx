@@ -35,6 +35,9 @@ import { DEFAULT_QUERY_LIMIT } from "~/lib/constants";
 import { useDebouncedCallback } from "use-debounce";
 import { SheetTitle, SheetDescription } from "@usesend/ui/src/sheet";
 import { extractEmailAddress } from "~/utils/email";
+// Using HTML checkbox since @usesend/ui doesn't have Checkbox component
+import { Trash2 } from "lucide-react";
+import { useState } from "react";
 
 /* Stupid hydrating error. And I so stupid to understand the stupid NextJS docs */
 const DynamicSheetWithNoSSR = dynamic(
@@ -54,6 +57,7 @@ export default function EmailsList() {
   const [search, setSearch] = useUrlState("search");
   const [domain, setDomain] = useUrlState("domain");
   const [apiKey, setApiKey] = useUrlState("apikey");
+  const [selectedRecipients, setSelectedRecipients] = useState<Set<string>>(new Set());
 
   const pageNumber = Number(page);
   const domainId = domain ? Number(domain) : undefined;
@@ -77,6 +81,14 @@ export default function EmailsList() {
     { enabled: false },
   );
 
+  const deleteRecipientsMutation = api.email.deleteRecipients.useMutation({
+    onSuccess: () => {
+      // Clear selection and refetch data
+      setSelectedRecipients(new Set());
+      recipientsQuery.refetch();
+    },
+  });
+
   const { data: domainsQuery } = api.domain.domains.useQuery();
   const { data: apiKeysQuery } = api.apiKey.getApiKeys.useQuery();
 
@@ -97,6 +109,37 @@ export default function EmailsList() {
       setSelectedRecipient(null);
     }
   };
+
+  const handleSelectRecipientCheckbox = (recipientId: string, checked: boolean) => {
+    const newSelected = new Set(selectedRecipients);
+    if (checked) {
+      newSelected.add(recipientId);
+    } else {
+      newSelected.delete(recipientId);
+    }
+    setSelectedRecipients(newSelected);
+  };
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked && recipientsQuery.data?.recipients) {
+      const allIds = new Set(recipientsQuery.data.recipients.map(r => r.id));
+      setSelectedRecipients(allIds);
+    } else {
+      setSelectedRecipients(new Set());
+    }
+  };
+
+  const handleDeleteSelected = () => {
+    if (selectedRecipients.size > 0) {
+      deleteRecipientsMutation.mutate({
+        recipientIds: Array.from(selectedRecipients)
+      });
+    }
+  };
+
+  const isAllSelected = (recipientsQuery.data?.recipients?.length ?? 0) > 0 &&
+    selectedRecipients.size === (recipientsQuery.data?.recipients?.length ?? 0);
+  const isSomeSelected = selectedRecipients.size > 0;
 
   const debouncedSearch = useDebouncedCallback((value: string) => {
     setSearch(value);
@@ -246,13 +289,32 @@ export default function EmailsList() {
             <Download className="h-4 w-4 mr-2" />
             Export
           </Button>
+          {isSomeSelected && (
+            <Button
+              variant="destructive"
+              onClick={handleDeleteSelected}
+              disabled={deleteRecipientsMutation.isPending}
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete ({selectedRecipients.size})
+            </Button>
+          )}
         </div>
       </div>
       <div className="flex flex-col rounded-xl border shadow">
         <Table className="">
           <TableHeader className="">
             <TableRow className=" bg-muted dark:bg-muted/70">
-              <TableHead className="rounded-tl-xl">Sender</TableHead>
+              <TableHead className="rounded-tl-xl w-12">
+                <input
+                  type="checkbox"
+                  checked={isAllSelected}
+                  onChange={(e) => handleSelectAll(e.target.checked)}
+                  aria-label="Select all"
+                  className="h-4 w-4"
+                />
+              </TableHead>
+              <TableHead>Sender</TableHead>
               <TableHead>Recipient</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Subject</TableHead>
@@ -264,7 +326,7 @@ export default function EmailsList() {
           <TableBody>
             {recipientsQuery.isLoading ? (
               <TableRow className="h-32">
-                <TableCell colSpan={5} className="text-center py-4">
+                <TableCell colSpan={6} className="text-center py-4">
                   <Spinner
                     className="w-6 h-6 mx-auto"
                     innerSvgClass="stroke-primary"
@@ -275,20 +337,40 @@ export default function EmailsList() {
               recipientsQuery.data?.recipients.map((recipient) => (
                 <TableRow
                   key={recipient.id}
-                  onClick={() => handleSelectRecipient(recipient.id)}
                   className=" cursor-pointer"
                 >
-                  <TableCell className="font-medium">
+                  <TableCell className="w-12">
+                    <input
+                      type="checkbox"
+                      checked={selectedRecipients.has(recipient.id)}
+                      onChange={(e) =>
+                        handleSelectRecipientCheckbox(recipient.id, e.target.checked)
+                      }
+                      onClick={(e) => e.stopPropagation()}
+                      aria-label={`Select recipient ${recipient.email}`}
+                      className="h-4 w-4"
+                    />
+                  </TableCell>
+                  <TableCell
+                    className="font-medium cursor-pointer"
+                    onClick={() => handleSelectRecipient(recipient.id)}
+                  >
                     <div className="flex gap-4 items-center">
                       <p>{extractEmailAddress(recipient.from)}</p>
                     </div>
                   </TableCell>
-                  <TableCell className="font-medium">
+                  <TableCell
+                    className="font-medium cursor-pointer"
+                    onClick={() => handleSelectRecipient(recipient.id)}
+                  >
                     <div className="flex gap-4 items-center">
                       <p>{extractEmailAddress(recipient.email)}</p>
                     </div>
                   </TableCell>
-                  <TableCell>
+                  <TableCell
+                    className="cursor-pointer"
+                    onClick={() => handleSelectRecipient(recipient.id)}
+                  >
                     {recipient.latestStatus === "SCHEDULED" && recipient.scheduledAt ? (
                       <TooltipProvider>
                         <Tooltip>
@@ -310,10 +392,16 @@ export default function EmailsList() {
                       <EmailStatusBadge status={recipient.latestStatus ?? "Sent"} />
                     )}
                   </TableCell>
-                  <TableCell className="">
+                  <TableCell
+                    className="cursor-pointer"
+                    onClick={() => handleSelectRecipient(recipient.id)}
+                  >
                     <div className=" max-w-xs truncate">{recipient.subject}</div>
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell
+                    className="text-right cursor-pointer"
+                    onClick={() => handleSelectRecipient(recipient.id)}
+                  >
                     {recipient.latestStatus !== "SCHEDULED"
                       ? formatDate(
                           recipient.scheduledAt ?? recipient.createdAt,
@@ -325,7 +413,7 @@ export default function EmailsList() {
               ))
             ) : (
               <TableRow className="h-32">
-                <TableCell colSpan={5} className="text-center py-4">
+                <TableCell colSpan={6} className="text-center py-4">
                   No recipients found
                 </TableCell>
               </TableRow>
