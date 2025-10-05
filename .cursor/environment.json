@@ -1,4 +1,0 @@
-{
-  "install": "pnpm i",
-  "start": "pnpm d"
-}

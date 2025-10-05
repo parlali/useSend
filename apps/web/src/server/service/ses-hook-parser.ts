@@ -256,6 +256,49 @@ export async function parseSesHook(data: SesEvent) {
     }
   }
 
+  // Check if this is a duplicate OPENED event (SES limitation: can't track per-recipient opens)
+  // Only record the first open to avoid duplicate events (can get 50+ opens for same email)
+  if (mailStatus === EmailStatus.OPENED) {
+    const existingOpenEvent = await db.emailEvent.findFirst({
+      where: {
+        emailId: email.id,
+        status: EmailStatus.OPENED,
+      },
+    });
+
+    if (existingOpenEvent) {
+      logger.info(
+        { emailId: email.id, sesEmailId },
+        "Skipping duplicate OPENED event - first open already recorded",
+      );
+      return true;
+    }
+  }
+
+  // Check if this is a duplicate CLICKED event (similar SES limitation for multi-recipient emails)
+  // Only record the first click to avoid duplicate events
+  if (mailStatus === EmailStatus.CLICKED) {
+    const clickData = mailData as SesClick;
+    const existingClickEvent = await db.emailEvent.findFirst({
+      where: {
+        emailId: email.id,
+        status: EmailStatus.CLICKED,
+        data: {
+          path: ["link"],
+          equals: clickData.link,
+        },
+      },
+    });
+
+    if (existingClickEvent) {
+      logger.info(
+        { emailId: email.id, sesEmailId, link: clickData.link },
+        "Skipping duplicate CLICKED event - first click on this link already recorded",
+      );
+      return true;
+    }
+  }
+
   logger.info("Creating email event");
 
   await db.emailEvent.create({
@@ -270,28 +313,32 @@ export async function parseSesHook(data: SesEvent) {
   // Also update EmailRecipient records and create EmailRecipientEvent records
   // But only for the specific recipients mentioned in the SES event data
   const allRecipients = await db.emailRecipient.findMany({
-    where: { emailId: email.id }
+    where: { emailId: email.id },
   });
 
   // Determine which recipients this event applies to
   const affectedRecipientEmails = getAffectedRecipients(data);
 
   // Find matching recipient records
-  const affectedRecipients = allRecipients.filter(recipient =>
-    affectedRecipientEmails.some(email =>
-      // Handle both clean emails and "Name <email>" format
-      email === recipient.email ||
-      recipient.email.includes(email) ||
-      email.includes(recipient.email.replace(/^.*<(.+)>.*$/, '$1'))
-    )
+  const affectedRecipients = allRecipients.filter((recipient) =>
+    affectedRecipientEmails.some(
+      (email) =>
+        // Handle both clean emails and "Name <email>" format
+        email === recipient.email ||
+        recipient.email.includes(email) ||
+        email.includes(recipient.email.replace(/^.*<(.+)>.*$/, "$1")),
+    ),
   );
 
-  logger.info({
-    affectedEmails: affectedRecipientEmails,
-    affectedRecipients: affectedRecipients.length,
-    totalRecipients: allRecipients.length,
-    eventType: data.eventType
-  }, "Applying event to specific recipients");
+  logger.info(
+    {
+      affectedEmails: affectedRecipientEmails,
+      affectedRecipients: affectedRecipients.length,
+      totalRecipients: allRecipients.length,
+      eventType: data.eventType,
+    },
+    "Applying event to specific recipients",
+  );
 
   for (const recipient of affectedRecipients) {
     // Update recipient's latest status
@@ -299,8 +346,8 @@ export async function parseSesHook(data: SesEvent) {
       where: { id: recipient.id },
       data: {
         latestStatus: mailStatus,
-        updatedAt: new Date()
-      }
+        updatedAt: new Date(),
+      },
     });
 
     // Create recipient-specific event
@@ -309,7 +356,7 @@ export async function parseSesHook(data: SesEvent) {
         recipientId: recipient.id,
         status: mailStatus,
         data: mailData as any,
-      }
+      },
     });
   }
 
