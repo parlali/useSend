@@ -199,7 +199,7 @@ const sslServerOptions: SMTPServerOptions = {
   allowInsecureAuth: false,
   onData: emailDataHandler,
   onAuth: authHandler,
-  size: 10485760,
+  size: 26214400,
 }
 
 // Plain server configuration (no TLS at all)
@@ -209,7 +209,7 @@ const plainServerOptions: SMTPServerOptions = {
   hideSTARTTLS: true,
   onData: emailDataHandler,
   onAuth: authHandler,
-  size: 10485760,
+  size: 26214400,
 };
 
 function startServers() {
