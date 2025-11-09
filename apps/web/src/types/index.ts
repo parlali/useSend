@@ -14,6 +14,10 @@ export type EmailContent = {
   scheduledAt?: string;
   inReplyToId?: string | null;
   sesTenantId?: string | null;
+  // Envelope fields - actual delivery recipients (overrides to/cc/bcc for delivery)
+  envelopeTo?: string | string[];
+  envelopeCc?: string | string[];
+  envelopeBcc?: string | string[];
 };
 
 export type EmailAttachment = {

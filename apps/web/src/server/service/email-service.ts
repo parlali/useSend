@@ -60,34 +60,46 @@ function splitEmailString(emailString: string): string[] {
 /**
  * Helper function to create an email with corresponding recipient records
  */
-export async function createEmailWithRecipients(emailData: {
-  to: string[];
-  from: string;
-  subject: string;
-  replyTo?: string[];
-  cc?: string[];
-  bcc?: string[];
-  text?: string | null;
-  html?: string | null;
-  teamId: number;
-  domainId: number;
-  attachments?: string;
-  scheduledAt?: Date;
-  latestStatus: EmailStatus;
-  apiId?: number;
-  inReplyToId?: string;
-  campaignId?: string;
-  contactId?: string;
-}) {
+export async function createEmailWithRecipients(
+  emailData: {
+    to: string[];
+    from: string;
+    subject: string;
+    replyTo?: string[];
+    cc?: string[];
+    bcc?: string[];
+    text?: string | null;
+    html?: string | null;
+    teamId: number;
+    domainId: number;
+    attachments?: string;
+    scheduledAt?: Date;
+    latestStatus: EmailStatus;
+    apiId?: number;
+    inReplyToId?: string;
+    campaignId?: string;
+    contactId?: string;
+  },
+  envelopeRecipients?: {
+    recipientTo?: string[];
+    recipientCc?: string[];
+    recipientBcc?: string[];
+  }
+) {
   // Create the email record
   const email = await db.email.create({
     data: emailData,
   });
 
+  // Use envelope recipients if provided, otherwise fall back to header recipients
+  const actualTo = envelopeRecipients?.recipientTo || emailData.to;
+  const actualCc = envelopeRecipients?.recipientCc || emailData.cc;
+  const actualBcc = envelopeRecipients?.recipientBcc || emailData.bcc;
+
   // Create recipient records for TO recipients
   const recipientPromises: Promise<any>[] = [];
 
-  for (const toEmailString of emailData.to || []) {
+  for (const toEmailString of actualTo || []) {
     const individualEmails = splitEmailString(toEmailString);
     for (const toEmail of individualEmails) {
       if (toEmail.trim()) {
@@ -108,7 +120,7 @@ export async function createEmailWithRecipients(emailData: {
   }
 
   // Create recipient records for CC recipients
-  for (const ccEmailString of emailData.cc || []) {
+  for (const ccEmailString of actualCc || []) {
     const individualEmails = splitEmailString(ccEmailString);
     for (const ccEmail of individualEmails) {
       if (ccEmail.trim()) {
@@ -129,7 +141,7 @@ export async function createEmailWithRecipients(emailData: {
   }
 
   // Create recipient records for BCC recipients
-  for (const bccEmailString of emailData.bcc || []) {
+  for (const bccEmailString of actualBcc || []) {
     const individualEmails = splitEmailString(bccEmailString);
     for (const bccEmail of individualEmails) {
       if (bccEmail.trim()) {
@@ -351,6 +363,26 @@ export async function sendEmail(
     ? Math.max(0, scheduledAtDate.getTime() - Date.now())
     : undefined;
 
+  const envelopeToArray = emailContent.envelopeTo
+    ? Array.isArray(emailContent.envelopeTo)
+      ? emailContent.envelopeTo
+      : [emailContent.envelopeTo]
+    : undefined;
+  const envelopeCcArray = emailContent.envelopeCc
+    ? Array.isArray(emailContent.envelopeCc)
+      ? emailContent.envelopeCc
+      : [emailContent.envelopeCc]
+    : undefined;
+  const envelopeBccArray = emailContent.envelopeBcc
+    ? Array.isArray(emailContent.envelopeBcc)
+      ? emailContent.envelopeBcc
+      : [emailContent.envelopeBcc]
+    : undefined;
+
+  const recipientTo = envelopeToArray || filteredToEmails;
+  const recipientCc = envelopeCcArray || (filteredCcEmails.length > 0 ? filteredCcEmails : undefined);
+  const recipientBcc = envelopeBccArray || (filteredBccEmails.length > 0 ? filteredBccEmails : undefined);
+
   const email = await createEmailWithRecipients({
     to: filteredToEmails,
     from,
@@ -371,16 +403,24 @@ export async function sendEmail(
     latestStatus: scheduledAtDate ? EmailStatus.SCHEDULED : EmailStatus.QUEUED,
     apiId: apiKeyId,
     inReplyToId: inReplyToId || undefined,
+  }, {
+    recipientTo,
+    recipientCc,
+    recipientBcc,
   });
 
   try {
+
     await EmailQueueService.queueEmail(
       email.id,
       teamId,
       domain.region,
       true,
       undefined,
-      delay
+      delay,
+      envelopeToArray,
+      envelopeCcArray,
+      envelopeBccArray
     );
   } catch (error: any) {
     await db.emailEvent.create({

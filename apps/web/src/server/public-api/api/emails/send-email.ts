@@ -40,11 +40,13 @@ function send(app: PublicAPIApp) {
       html = _html;
     }
 
+    const requestData = c.req.valid("json");
+
     const email = await sendEmail({
-      ...c.req.valid("json"),
+      ...requestData,
       teamId: team.id,
       apiKeyId: team.apiKeyId,
-      text: c.req.valid("json").text ?? undefined,
+      text: requestData.text ?? undefined,
       html: html,
     });
 

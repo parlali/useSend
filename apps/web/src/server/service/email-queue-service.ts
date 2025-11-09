@@ -1,4 +1,4 @@
-import { Job, Queue, Worker } from "bullmq";
+import { Queue, Worker } from "bullmq";
 import { env } from "~/env";
 import { EmailAttachment } from "~/types";
 import { convert as htmlToText } from "html-to-text";
@@ -7,7 +7,6 @@ import { db } from "../db";
 import { sendRawEmail } from "../aws/ses";
 import { getRedis } from "../redis";
 import { DEFAULT_QUEUE_OPTIONS } from "../queue/queue-constants";
-import { Prisma } from "@prisma/client";
 import { logger } from "../logger/log";
 import { createWorkerHandler, TeamJob } from "../queue/bullmq-context";
 import { LimitService } from "./limit-service";
@@ -18,6 +17,9 @@ type QueueEmailJob = TeamJob<{
   timestamp: number;
   unsubUrl?: string;
   isBulk?: boolean;
+  envelopeTo?: string[];
+  envelopeCc?: string[];
+  envelopeBcc?: string[];
 }>;
 
 function createQueueAndWorker(region: string, quota: number, suffix: string) {
@@ -114,7 +116,10 @@ export class EmailQueueService {
     region: string,
     transactional: boolean,
     unsubUrl?: string,
-    delay?: number
+    delay?: number,
+    envelopeTo?: string[],
+    envelopeCc?: string[],
+    envelopeBcc?: string[]
   ) {
     if (!this.initialized) {
       await this.init();
@@ -128,7 +133,7 @@ export class EmailQueueService {
     }
     queue.add(
       emailId,
-      { emailId, timestamp: Date.now(), unsubUrl, isBulk, teamId },
+      { emailId, timestamp: Date.now(), unsubUrl, isBulk, teamId, envelopeTo, envelopeCc, envelopeBcc },
       { jobId: emailId, delay, ...DEFAULT_QUEUE_OPTIONS }
     );
   }
@@ -305,7 +310,10 @@ export class EmailQueueService {
 
 async function executeEmail(job: QueueEmailJob) {
   logger.info(
-    { emailId: job.data.emailId, elapsed: Date.now() - job.data.timestamp },
+    {
+      emailId: job.data.emailId,
+      elapsed: Date.now() - job.data.timestamp,
+    },
     `[EmailQueueService]: Executing email job`
   );
 
@@ -408,6 +416,9 @@ async function executeEmail(job: QueueEmailJob) {
       inReplyToMessageId,
       emailId: email.id,
       sesTenantId: domain?.sesTenantId,
+      envelopeTo: job.data.envelopeTo,
+      envelopeCc: job.data.envelopeCc,
+      envelopeBcc: job.data.envelopeBcc,
     });
 
     logger.info(

@@ -201,6 +201,9 @@ export async function sendRawEmail({
   inReplyToMessageId,
   emailId,
   sesTenantId,
+  envelopeTo,
+  envelopeCc,
+  envelopeBcc,
 }: Partial<EmailContent> & {
   region: string;
   configurationSetName: string;
@@ -213,8 +216,31 @@ export async function sendRawEmail({
   isBulk?: boolean;
   inReplyToMessageId?: string;
   emailId?: string;
+  envelopeTo?: string[];
+  envelopeCc?: string[];
+  envelopeBcc?: string[];
 }) {
   const sesClient = getSesClient(region);
+
+  const customHeaders: Record<string, string | string[]> = {
+    "X-Entity-Ref-ID": nanoid(),
+    ...(emailId
+      ? { "X-Usesend-Email-ID": emailId, "X-Unsend-Email-ID": emailId }
+      : {}),
+    ...(unsubUrl
+      ? {
+          "List-Unsubscribe": `<${unsubUrl}>`,
+          "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        }
+      : {}),
+    ...(isBulk ? { Precedence: "bulk" } : {}),
+    ...(inReplyToMessageId
+      ? {
+          "In-Reply-To": `<${inReplyToMessageId}@email.amazonses.com>`,
+          References: `<${inReplyToMessageId}@email.amazonses.com>`,
+        }
+      : {}),
+  };
 
   const { message: messageStream } = await nodemailer
     .createTransport({ streamTransport: true })
@@ -232,25 +258,7 @@ export async function sendRawEmail({
       replyTo,
       cc,
       bcc,
-      headers: {
-        "X-Entity-Ref-ID": nanoid(),
-        ...(emailId
-          ? { "X-Usesend-Email-ID": emailId, "X-Unsend-Email-ID": emailId }
-          : {}),
-        ...(unsubUrl
-          ? {
-              "List-Unsubscribe": `<${unsubUrl}>`,
-              "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-            }
-          : {}),
-        ...(isBulk ? { Precedence: "bulk" } : {}),
-        ...(inReplyToMessageId
-          ? {
-              "In-Reply-To": `<${inReplyToMessageId}@email.amazonses.com>`,
-              References: `<${inReplyToMessageId}@email.amazonses.com>`,
-            }
-          : {}),
-      },
+      headers: customHeaders,
     });
 
   const chunks = [];
@@ -259,12 +267,21 @@ export async function sendRawEmail({
   }
   const finalMessageData = Buffer.concat(chunks);
 
+  const hasEnvelopeFields = envelopeTo || envelopeCc || envelopeBcc;
+
+  const destinationParam = hasEnvelopeFields ? {
+    ToAddresses: envelopeTo,
+    CcAddresses: envelopeCc,
+    BccAddresses: envelopeBcc,
+  } : undefined;
+
   const command = new SendEmailCommand({
     Content: {
       Raw: {
         Data: finalMessageData,
       },
     },
+    Destination: destinationParam,
     ConfigurationSetName: configurationSetName,
     TenantName: sesTenantId ? sesTenantId : undefined,
   });

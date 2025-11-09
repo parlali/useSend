@@ -30,6 +30,17 @@ export const emailSchema = z
       .optional(),
     scheduledAt: z.string().datetime({ offset: true }).optional(), // Ensure ISO 8601 format with offset
     inReplyToId: z.string().optional().nullable(),
+    // Envelope fields - when provided, these override the actual delivery recipients
+    // while keeping the original to/cc/bcc in headers for proper email display
+    envelopeTo: z.string().or(z.array(z.string())).optional().openapi({
+      description: "Actual delivery recipients (SMTP envelope). When provided, to/cc/bcc are only used for headers.",
+    }),
+    envelopeCc: z.string().or(z.array(z.string())).optional().openapi({
+      description: "Actual CC delivery recipients (SMTP envelope).",
+    }),
+    envelopeBcc: z.string().or(z.array(z.string())).optional().openapi({
+      description: "Actual BCC delivery recipients (SMTP envelope).",
+    }),
   })
   .refine(
     (data) => !!data.subject || !!data.templateId,
